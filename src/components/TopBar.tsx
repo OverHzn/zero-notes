@@ -1,5 +1,6 @@
 import { SyncBadge } from './SyncBadge';
 import type { SyncStatus } from '../types';
+import logoUrl from '../assets/logo.png';
 
 interface Props {
   syncStatus: SyncStatus;
@@ -24,7 +25,7 @@ export function TopBar({
     <header className="topbar">
       <div className="topbar-left">
         <div className="brand">
-          <span className="brand-mark">0</span>
+          <img className="brand-mark" src={logoUrl} alt="" width={28} height={28} />
           <span className="brand-name">Zero Notes</span>
         </div>
       </div>
