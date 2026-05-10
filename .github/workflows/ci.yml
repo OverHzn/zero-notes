@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-typecheck-build:
+    name: Lint + Typecheck + Build (renderer)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build renderer
+        run: npm run build
+
+  windows-package:
+    name: Windows installer (electron-builder)
+    runs-on: windows-latest
+    # We let CI verify the Windows installer builds on PRs against main, but
+    # don't fail the gate if Windows is the only failure — let the renderer
+    # checks above be the required gate.
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Package Windows installer
+        env:
+          # electron-builder publishes nothing in CI by default.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No code signing certificate in this template repo — disable.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run dist
