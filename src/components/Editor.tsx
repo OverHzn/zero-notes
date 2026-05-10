@@ -44,17 +44,24 @@ export function Editor({ note, folders, onChange, onTogglePin, onDelete, debounc
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note?.id]);
 
+  // Keep `onChange` in a ref so the debounced save always calls the latest
+  // version even though we deliberately don't rebuild the debounce timer when
+  // `onChange`'s identity changes (which happens whenever the parent's
+  // `reloadNotes` is recreated, e.g. on every search/selection change).
+  const onChangeRef = useRef(onChange);
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
   const debouncedSave = useMemo(() => {
     return debounce(async (id: string, patch: Partial<Note>) => {
       try {
-        await onChange(id, patch);
+        await onChangeRef.current(id, patch);
         setSavedAt(Date.now());
       } catch (err) {
         console.error('Failed to save note', err);
       }
     }, Math.max(150, debounceMs));
-    // We deliberately rebuild this when debounceMs changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debounceMs]);
 
   useEffect(() => {

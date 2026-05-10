@@ -98,8 +98,16 @@ function startLoopbackServer(state) {
             rej(e);
           } finally {
             // Close after a short delay so the browser actually receives the
-            // response body before the socket dies.
-            setTimeout(() => server.close(), 250);
+            // response body before the socket dies. `loginInteractive` also
+            // closes the server in its own finally block, so guard against the
+            // already-closed case to avoid an unhandled ERR_SERVER_NOT_RUNNING.
+            setTimeout(() => {
+              try {
+                server.close();
+              } catch {
+                /* server already closed */
+              }
+            }, 250);
           }
         });
       });
@@ -174,7 +182,11 @@ async function loginInteractive() {
   try {
     code = await server.codePromise;
   } finally {
-    server.close();
+    try {
+      server.close();
+    } catch {
+      /* The request handler may have already closed the server. */
+    }
   }
 
   const { tokens: tok } = await oauth2Client.getToken(code);

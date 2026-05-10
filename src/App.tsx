@@ -67,19 +67,26 @@ export default function App() {
     })();
   }, []);
 
-  // Live event subscriptions.
+  // Refs let us register the IPC subscriptions exactly once on mount while
+  // still always invoking the *latest* handler. Without this, the empty
+  // dependency array on the effect would capture a stale `selection` (and
+  // other deps), so e.g. Ctrl+N would always create a note in the initial
+  // sidebar selection rather than the user's current one.
+  const handleNewNoteRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  const handleSyncNowRef = useRef<() => Promise<void>>(() => Promise.resolve());
+
+  // Live event subscriptions — registered once.
   useEffect(() => {
     const unSync = api.on.syncStatus((s) => setSyncStatus(s));
     const unAuth = api.on.authChanged((a) => setAuthStatus(a));
-    const unNew = api.on.shortcutNewNote(() => void handleNewNote());
-    const unSyncNow = api.on.shortcutSyncNow(() => void handleSyncNow());
+    const unNew = api.on.shortcutNewNote(() => void handleNewNoteRef.current());
+    const unSyncNow = api.on.shortcutSyncNow(() => void handleSyncNowRef.current());
     return () => {
       unSync();
       unAuth();
       unNew();
       unSyncNow();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const reloadFolders = useCallback(async () => {
@@ -191,6 +198,15 @@ export default function App() {
     await api.sync.now();
     // sync:status event will refresh state via subscription.
   }, []);
+
+  // Keep shortcut refs current so the IPC listeners always invoke the latest
+  // closures (with the latest `selection`, etc.).
+  useEffect(() => {
+    handleNewNoteRef.current = handleNewNote;
+  }, [handleNewNote]);
+  useEffect(() => {
+    handleSyncNowRef.current = handleSyncNow;
+  }, [handleSyncNow]);
 
   const handleLogin = useCallback(async () => {
     const next = await api.auth.login();

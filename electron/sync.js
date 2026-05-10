@@ -97,16 +97,31 @@ function buildLocalPayload() {
   };
 }
 
-function pickWinner(localNote, remoteNote) {
-  // Both sides exist — last-write-wins by updated_at.
+// pickWinner returns `winner` ('local' | 'remote' | 'tie') and `conflict`.
+//
+// A *true* conflict requires both sides to have changed since the last
+// successful sync — not merely that their `updated_at` timestamps differ.
+// Without `lastSyncAt` we can't be sure, so we conservatively treat any
+// disagreement as a conflict (preserving v1 behavior). When `lastSyncAt` is
+// known, only notes whose `updated_at > lastSyncAt` on BOTH sides are flagged
+// as conflicts; otherwise we silently let the newer side win.
+function pickWinner(localNote, remoteNote, lastSyncAt) {
   const lu = localNote.updated_at || 0;
   const ru = remoteNote.updated_at || 0;
   if (lu === ru) return { winner: 'tie', conflict: false };
-  if (lu > ru) return { winner: 'local', conflict: true };
-  return { winner: 'remote', conflict: true };
+
+  let conflict;
+  if (typeof lastSyncAt === 'number' && lastSyncAt > 0) {
+    conflict = lu > lastSyncAt && ru > lastSyncAt;
+  } else {
+    conflict = true;
+  }
+
+  if (lu > ru) return { winner: 'local', conflict };
+  return { winner: 'remote', conflict };
 }
 
-function mergeNotes(local, remote, strategy) {
+function mergeNotes(local, remote, strategy, lastSyncAt) {
   // Build maps keyed by id.
   const byId = new Map();
   for (const n of local) byId.set(n.id, { local: n, remote: null });
@@ -128,7 +143,7 @@ function mergeNotes(local, remote, strategy) {
       merged.push(r);
       continue;
     }
-    const { winner, conflict } = pickWinner(l, r);
+    const { winner, conflict } = pickWinner(l, r, lastSyncAt);
     if (conflict) conflicts += 1;
 
     if (winner === 'tie') {
@@ -218,10 +233,16 @@ async function runOnce({ trigger = 'manual' } = {}) {
       let conflicts = 0;
 
       if (remoteParsed && Array.isArray(remoteParsed.notes)) {
+        // Use the timestamp that *the remote payload* recorded as its last
+        // successful sync. Notes whose updated_at exceeds this value have
+        // changed since the last sync and are eligible for conflict flagging.
+        const lastSyncAt =
+          typeof remoteParsed.lastSyncAt === 'number' ? remoteParsed.lastSyncAt : 0;
         const result = mergeNotes(
           localPayload.notes,
           remoteParsed.notes,
-          settings.conflictStrategy || 'last-write-wins'
+          settings.conflictStrategy || 'last-write-wins',
+          lastSyncAt
         );
         mergedNotes = result.merged;
         conflicts = result.conflicts;
