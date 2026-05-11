@@ -161,10 +161,24 @@ export default function App() {
     setSelectedId(note.id);
   }, [selection, reloadNotes, reloadTags]);
 
+  // Mirror selectedId in a ref so an in-flight save can tell whether the user
+  // has since switched notes — without this, a debounced save flushed on
+  // note switch would overwrite the newly-selected note with the previous
+  // note's data.
+  const selectedIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
+
   const handleUpdate = useCallback(
     async (id: string, patch: Partial<Note>) => {
       const updated = await api.notes.update(id, patch);
-      setSelectedNote(updated);
+      // Guard: only push the saved row into `selectedNote` if it's still the
+      // currently-selected note. Otherwise we'd clobber the user's new
+      // selection with stale data from the previous note.
+      if (selectedIdRef.current === updated.id) {
+        setSelectedNote(updated);
+      }
       // Refresh the list so titles/preview update.
       await reloadNotes();
       await reloadTags();

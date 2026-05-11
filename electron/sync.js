@@ -257,19 +257,35 @@ async function runOnce({ trigger = 'manual' } = {}) {
         const id = dbRef.ensureFolderByName(f.name);
         folderNameToId.set(f.name, id);
       }
+      // Every note whose folder_id can't be resolved to one of these local
+      // ids must be nulled out, otherwise the upsert below trips an FK
+      // constraint on notes.folder_id → folders.id.
+      const validFolderIds = new Set(folderNameToId.values());
 
-      for (const note of mergedNotes) {
-        // Translate folder_id if the remote used a different folder uuid for
-        // the same folder name.
-        if (note.folder_id && remoteParsed && Array.isArray(remoteParsed.folders)) {
-          const remoteFolder = remoteParsed.folders.find((f) => f.id === note.folder_id);
-          if (remoteFolder && folderNameToId.has(remoteFolder.name)) {
-            note.folder_id = folderNameToId.get(remoteFolder.name);
+      // Wrap the whole apply step in a single SQLite transaction so a bad
+      // row can't leave the DB half-updated — better-sqlite3's transaction
+      // wrapper is synchronous, which matches every db helper called below.
+      const applyMergedToDb = dbRef.getDb().transaction(() => {
+        for (const note of mergedNotes) {
+          // Translate folder_id if the remote used a different folder uuid
+          // for the same folder name.
+          if (note.folder_id && remoteParsed && Array.isArray(remoteParsed.folders)) {
+            const remoteFolder = remoteParsed.folders.find((f) => f.id === note.folder_id);
+            if (remoteFolder && folderNameToId.has(remoteFolder.name)) {
+              note.folder_id = folderNameToId.get(remoteFolder.name);
+            }
           }
+          // Drop any folder_id that still doesn't map to a real local folder
+          // (e.g. the remote referenced a folder that wasn't included in the
+          // remote payload's `folders` list).
+          if (note.folder_id && !validFolderIds.has(note.folder_id)) {
+            note.folder_id = null;
+          }
+          dbRef.upsertNoteFromSync(note);
         }
-        dbRef.upsertNoteFromSync(note);
-      }
-      dbRef.markAllSynced();
+        dbRef.markAllSynced();
+      });
+      applyMergedToDb();
 
       // 5. Build upload payload from the now-canonical local DB and upload.
       const uploadPayload = buildLocalPayload();
