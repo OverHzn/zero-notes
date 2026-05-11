@@ -2,23 +2,22 @@
 
 // Loads the Google OAuth client credentials.
 //
-// We look in two places, in order:
-//   1. <userData>/oauth-config.json — written by the user via Settings UI or
-//      manually placed alongside the app data folder.
+// We look in three places, in order:
+//   1. <userData>/oauth-config.json — per-user override written via the
+//      Settings UI or manually placed alongside the app data folder. Takes
+//      precedence so power users can swap in their own OAuth client.
 //   2. ZN_GOOGLE_CLIENT_ID + ZN_GOOGLE_CLIENT_SECRET environment variables —
-//      useful for `npm run dev` so contributors don't need to bake credentials
-//      into the repo.
+//      used during `npm run dev` so contributors don't need to bake
+//      credentials into a build.
+//   3. electron/oauth-config.bundled.json — written by scripts/prebuild-oauth.cjs
+//      before `npm run dist` from the same env vars. This is what makes the
+//      installer "click Login with Google → done" with no setup required by
+//      the end user. The file is .gitignored so the value never enters source.
 //
-// We deliberately do NOT bundle a client_secret with the app source. Each
-// installer build is expected to either:
-//   * ship a client_secret.json next to the executable (recommended for
-//     small/personal builds), or
-//   * have the user paste their Client ID + Secret into Settings on first
-//     launch.
-//
-// The OAuth Desktop App flow does not treat the client secret as truly secret
-// — Google explicitly states this in their docs — but we still avoid checking
-// it into source control.
+// Per Google's docs, the client_secret for a *Desktop* OAuth client is not a
+// real secret — it's designed to be embedded in distributed desktop apps —
+// so bundling it is fine for this flow. (drive.file or web flows are
+// different.)
 
 const path = require('node:path');
 const fs = require('node:fs');
@@ -63,8 +62,27 @@ function readFromEnv() {
   return null;
 }
 
+function readFromBundle() {
+  // electron/oauth-config.bundled.json lives next to this file. In production
+  // builds it's inside app.asar, which fs and require handle transparently.
+  const file = path.join(__dirname, 'oauth-config.bundled.json');
+  try {
+    const raw = fs.readFileSync(file, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.client_id && parsed.client_secret) {
+      return {
+        clientId: parsed.client_id,
+        clientSecret: parsed.client_secret,
+      };
+    }
+  } catch {
+    // File missing or empty stub — that's normal for fresh checkouts.
+  }
+  return null;
+}
+
 function load() {
-  return readFromDisk() || readFromEnv();
+  return readFromDisk() || readFromEnv() || readFromBundle();
 }
 
 function save({ clientId, clientSecret }) {
