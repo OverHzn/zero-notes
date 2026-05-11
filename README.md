@@ -79,7 +79,7 @@ npm install
 
 ## 2. Set up Google OAuth (Desktop client)
 
-You need a **Desktop App** OAuth client from Google Cloud Console. This is one-time, ~3 minutes.
+You need a **Desktop App** OAuth client from Google Cloud Console. This is one-time, ~3 minutes — and only for the person *building* the installer. **End users who run the resulting `.exe` do not need to do any of this** as long as you bundle the credentials (Option A below).
 
 1. Open [Google Cloud Console](https://console.cloud.google.com/) and create (or pick) a project.
 2. **APIs & Services → Library** → enable **Google Drive API**.
@@ -88,39 +88,65 @@ You need a **Desktop App** OAuth client from Google Cloud Console. This is one-t
    - Application type: **Desktop app**
    - Name: `Zero Notes (desktop)`
 5. Copy the **Client ID** and **Client secret**. (Google's docs note that for installed/desktop apps, the client secret is not actually treated as confidential, but we still avoid checking it into source control.)
-6. Provide them to Zero Notes in any one of these ways:
+6. (Optional) **Test users**: while your OAuth consent screen is in "Testing" mode, add yourself under "Test users", or publish the app.
 
-   - **Recommended (dev)**: create `.env` next to `package.json`:
+Provide the credentials to Zero Notes one of three ways:
 
-     ```env
-     ZN_GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
-     ZN_GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxx
-     ```
+### Option A — Bundle into the installer (recommended for distribution)
 
-     and run dev as `cross-env $(cat .env | xargs) npm run dev` — or just export them in your shell.
+Set the env vars in your build shell, then run `npm run dist`:
 
-   - **Recommended (installed app)**: drop a JSON file at
-     `%APPDATA%/Zero Notes/oauth-config.json` containing either Google's downloaded format:
+**PowerShell:**
+```powershell
+$env:ZN_GOOGLE_CLIENT_ID = "xxxxx.apps.googleusercontent.com"
+$env:ZN_GOOGLE_CLIENT_SECRET = "GOCSPX-xxxxxxxx"
+npm run dist
+```
 
-     ```json
-     {
-       "installed": {
-         "client_id": "xxxxx.apps.googleusercontent.com",
-         "client_secret": "GOCSPX-xxxxxxxx"
-       }
-     }
-     ```
+**bash:**
+```bash
+export ZN_GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
+export ZN_GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxx
+npm run dist
+```
 
-     or our short form:
+The `predist` hook runs `scripts/prebuild-oauth.cjs`, which writes `electron/oauth-config.bundled.json` from those env vars. `electron-builder` then includes the file inside `app.asar`. The generated file is `.gitignore`d — it never enters source control, even after a build.
 
-     ```json
-     {
-       "client_id": "xxxxx.apps.googleusercontent.com",
-       "client_secret": "GOCSPX-xxxxxxxx"
-     }
-     ```
+The resulting `Zero Notes-Setup-<version>.exe` is fully self-contained: end users just install, click **Login with Google**, sign in via their system browser, and they're done.
 
-7. (Optional) **Test users**: while your OAuth consent screen is in "Testing" mode, add yourself under "Test users", or publish the app.
+### Option B — Environment variables (recommended for dev)
+
+For `npm run dev`, export the same vars in your shell (or use a `.env` loader of your choice):
+
+```bash
+export ZN_GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
+export ZN_GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxx
+npm run dev
+```
+
+### Option C — Per-user config file (fallback)
+
+If neither of the above is set, Zero Notes reads `%APPDATA%/Zero Notes/oauth-config.json` (Linux/macOS: `~/.config/Zero Notes/oauth-config.json`). Accepts either Google's downloaded format:
+
+```json
+{
+  "installed": {
+    "client_id": "xxxxx.apps.googleusercontent.com",
+    "client_secret": "GOCSPX-xxxxxxxx"
+  }
+}
+```
+
+or the short form:
+
+```json
+{
+  "client_id": "xxxxx.apps.googleusercontent.com",
+  "client_secret": "GOCSPX-xxxxxxxx"
+}
+```
+
+**Priority order at runtime** (highest wins): per-user `oauth-config.json` → env vars → bundled `electron/oauth-config.bundled.json`.
 
 > **Why only `drive.appdata`?** This scope confines us to a hidden per-app folder. Zero Notes literally cannot see your other Drive files — even if there were a bug.
 
@@ -216,15 +242,16 @@ The full payload schema (see `electron/sync.js → buildLocalPayload()`):
 
 ## Scripts
 
-| Command            | What it does                                       |
-| ------------------ | -------------------------------------------------- |
-| `npm run dev`      | Vite + Electron in dev mode (HMR for the renderer) |
-| `npm run build`    | Build the renderer to `dist/`                      |
-| `npm run start`    | Run Electron against the built `dist/`             |
-| `npm run lint`     | ESLint over JS/TS/TSX                              |
-| `npm run typecheck`| `tsc --noEmit`                                     |
-| `npm run dist`     | Build + package Windows NSIS installer             |
-| `npm run dist:dir` | Build + unpacked Windows directory                 |
+| Command              | What it does                                                            |
+| -------------------- | ----------------------------------------------------------------------- |
+| `npm run dev`        | Vite + Electron in dev mode (HMR for the renderer)                      |
+| `npm run build`      | Build the renderer to `dist/`                                           |
+| `npm run start`      | Run Electron against the built `dist/`                                  |
+| `npm run lint`       | ESLint over JS/TS/TSX                                                   |
+| `npm run typecheck`  | `tsc --noEmit`                                                          |
+| `npm run bundle-oauth` | Bake `ZN_GOOGLE_CLIENT_ID`/`_SECRET` env vars into the packaged app   |
+| `npm run dist`       | Build + package Windows NSIS installer (auto-runs `bundle-oauth` first) |
+| `npm run dist:dir`   | Build + unpacked Windows directory                                      |
 
 ---
 
